@@ -1,0 +1,10 @@
+import {test,after,before} from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+let child;const base='http://127.0.0.1:8788/api/ai',token='local-test-token-not-a-real-key-12345';
+before(async()=>{child=spawn(process.execPath,['server/ai.mjs'],{env:{...process.env,GEMINI_API_KEY:'not-a-real-provider-key',AI_ACCESS_TOKEN:token,PORT:'8788',ALLOWED_ORIGINS:'http://localhost:4173'},stdio:['ignore','pipe','pipe']});await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Server startup timed out')),10000);child.stdout.once('data',()=>{clearTimeout(timer);resolve();});child.once('error',reject);});});after(()=>child?.kill());
+test('disallowed origins cannot use the server',async()=>{const r=await fetch(base,{method:'POST',headers:{Origin:'https://untrusted.invalid'}});assert.equal(r.status,403);});
+test('missing access tokens are rejected',async()=>{const r=await fetch(base,{method:'POST',headers:{Origin:'http://localhost:4173'}});assert.equal(r.status,401);});
+test('preflight is restricted to the allowed origin',async()=>{const r=await fetch(base,{method:'OPTIONS',headers:{Origin:'http://localhost:4173'}});assert.equal(r.status,204);assert.equal(r.headers.get('access-control-allow-origin'),'http://localhost:4173');});
+test('invalid payloads fail locally without contacting an AI provider',async()=>{const r=await fetch(base,{method:'POST',headers:{Origin:'http://localhost:4173',Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({instruction:'',text:'',language:'ps'})});assert.equal(r.status,400);assert.equal(r.headers.get('cache-control'),'no-store');});
+test('oversized requests are rejected',async()=>{const r=await fetch(base,{method:'POST',headers:{Origin:'http://localhost:4173',Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({text:'x'.repeat(90000)})});assert.equal(r.status,413);});
